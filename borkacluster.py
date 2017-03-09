@@ -13,48 +13,6 @@ import requests
 import sys
 import time
 
-def _tag_cluster_res(client, cluster_name, resource_ids, resource_type):
-	if type(resource_ids) == str:
-		resource_ids = [resource_ids]
-	return client.create_tags(Resources=resource_ids, Tags=[{'Key':'Name', 'Value':cluster_name + ' ' + resource_type}, {'Key':'Cluster', 'Value':cluster_name}])
-
-def generate_simplified_price_list():
-	''' Download Amazon's price list and generate simplified list for OnDemand Linux instances.'''
-	pricing_url_prefix = 'https://pricing.us-east-1.amazonaws.com'
-	print('Getting latest offers...', end='')
-	offers = requests.get(pricing_url_prefix + '/offers/v1.0/aws/index.json')
-	offers = offers.json()
-	print('done!')
-	
-	price_list_url = pricing_url_prefix + offers['offers']['AmazonEC2']['currentVersionUrl']
-	print('Downloading (100MB+ file)...', end='')
-	price_list = requests.get(price_list_url)
-
-	print('generating...', end='')
-	price_list = price_list.json()
-	simplified_price_dict = dict()
-	simplified_price_list = []
-	for tv_ in price_list['terms']['OnDemand'].itervalues():
-		tv = tv_.values()[0]
-		sku = tv['sku']
-		price = tv['priceDimensions'].values()[0]
-		prod = price_list['products'][sku]
-		attr = prod['attributes']
-
-		if (prod['productFamily'] == 'Compute Instance') and (attr['tenancy'] != 'Host') and (attr['operatingSystem'] == 'Linux'):
-			if not simplified_price_dict.has_key(attr['instanceType']):
-				simplified_price_dict[attr['instanceType']] = dict()
-				simplified_price_dict[attr['instanceType']]['Shared'] = dict()
-				simplified_price_dict[attr['instanceType']]['Dedicated'] = dict()
-
-			simplified_price_dict[attr['instanceType']][attr['tenancy']][attr['location']] = price['pricePerUnit']['USD']
-			simplified_price_list.append((attr['instanceType'], attr['tenancy'], attr['location']) + price['pricePerUnit'].items()[0])
-
-	print('saving...', end='')
-	with open('simplified_price_list.json', 'w') as f:
-		json.dump(simplified_price_dict, f, indent=1)
-	print('done')
-
 def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='cheap', cheap_factor=1.5, cluster_region='ca-central-1', controller_availability_zone=None, data_volume_size=16):
 	""" Create a computing cluster out of an EC2 spot fleet of Linux instances.
 
@@ -530,6 +488,47 @@ def dismantle_cluster(resources_file_or_dict, keep_EBSdata=True):
 
 	print('Cluster ' + cluster['name'] + ' dismantled!')
 
+def _tag_cluster_res(client, cluster_name, resource_ids, resource_type):
+	if type(resource_ids) == str:
+		resource_ids = [resource_ids]
+	return client.create_tags(Resources=resource_ids, Tags=[{'Key':'Name', 'Value':cluster_name + ' ' + resource_type}, {'Key':'Cluster', 'Value':cluster_name}])
+
+def generate_simplified_price_list():
+	''' Download Amazon's price list and generate simplified list for OnDemand Linux instances.'''
+	pricing_url_prefix = 'https://pricing.us-east-1.amazonaws.com'
+	print('Getting latest offers...', end='')
+	offers = requests.get(pricing_url_prefix + '/offers/v1.0/aws/index.json')
+	offers = offers.json()
+	print('done!')
+	
+	price_list_url = pricing_url_prefix + offers['offers']['AmazonEC2']['currentVersionUrl']
+	print('Downloading (100MB+ file)...', end='')
+	price_list = requests.get(price_list_url)
+
+	print('generating...', end='')
+	price_list = price_list.json()
+	simplified_price_dict = dict()
+	simplified_price_list = []
+	for tv_ in price_list['terms']['OnDemand'].itervalues():
+		tv = tv_.values()[0]
+		sku = tv['sku']
+		price = tv['priceDimensions'].values()[0]
+		prod = price_list['products'][sku]
+		attr = prod['attributes']
+
+		if (prod['productFamily'] == 'Compute Instance') and (attr['tenancy'] != 'Host') and (attr['operatingSystem'] == 'Linux'):
+			if not simplified_price_dict.has_key(attr['instanceType']):
+				simplified_price_dict[attr['instanceType']] = dict()
+				simplified_price_dict[attr['instanceType']]['Shared'] = dict()
+				simplified_price_dict[attr['instanceType']]['Dedicated'] = dict()
+
+			simplified_price_dict[attr['instanceType']][attr['tenancy']][attr['location']] = price['pricePerUnit']['USD']
+			simplified_price_list.append((attr['instanceType'], attr['tenancy'], attr['location']) + price['pricePerUnit'].items()[0])
+
+	print('saving...', end='')
+	with open('simplified_price_list.json', 'w') as f:
+		json.dump(simplified_price_dict, f, indent=1)
+	print('done')
 
 
 def main():
