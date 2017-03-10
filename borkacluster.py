@@ -33,8 +33,8 @@ region_to_region = {'us-east-1':'US East (N. Virginia)',
 					}				
 
 cx_fleet_weight = {'c3.large': 2.0, 'c3.xlarge': 4.0, 'c3.2xlarge': 8.0, 'c3.4xlarge': 16.0, 'c3.8xlarge': 32.0,
-                   'c4.large': 2.0, 'c4.xlarge': 4.0, 'c4.2xlarge': 8.0, 'c4.4xlarge': 16.0, 'c4.8xlarge': 36.0
-                   }
+				   'c4.large': 2.0, 'c4.xlarge': 4.0, 'c4.2xlarge': 8.0, 'c4.4xlarge': 16.0, 'c4.8xlarge': 36.0
+				   }
 
 
 def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='cheap', cheap_factor=1.5, cluster_region='ca-central-1', controller_availability_zone=None, data_volume_size=16):
@@ -278,6 +278,8 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 													 {'Name':'block-device-mapping.volume-type', 'Values':['gp2']}])['Images']
 	ami_linux_id = sorted(amazon_simple_ami, key=lambda x: x['Description'], reverse=True)[0]['ImageId']
 	
+	cluster
+
 	controller_instance_type = 't2.micro'
 	controller_subnet_id = subnet_ids[controller_availability_zone][0]
 
@@ -287,8 +289,6 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 	controller_startup_script = controller_startup_script.format(ebsdata_device=ebsdata_device, 
 																 ebsdata_mount_point=ebsdata_mount_point, 
 																 network_prefix=network_prefix)
-	#controller_startup_script_base64 = base64.b64encode(controller_startup_script)
-
 
 	controller_instance = ec2.run_instances(ImageId=ami_linux_id, KeyName=key_name, 
 											MinCount=1, MaxCount=1,
@@ -327,10 +327,10 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 	ec2.attach_volume(VolumeId=ebsdata_id, InstanceId=controller_instance_id, Device=ebsdata_device)
 	print('done')
 
-	with open(cluster_name + '_ClusterResources.json', 'w') as f:
-		json.dump(cluster, f, indent=1)
 
 
+	print('Hold on to your helmet, requesting spot fleet (' + str(target_number_of_cores) + ' vCPU)...')
+	### Seeking bid advice
 	print('Load OnDemand price list...', end='')
 	if not os.path.isfile('simplified_price_list.json'):
 		print('not found, downloading...', end='')
@@ -341,12 +341,57 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 			simplificed_price_list = json.load(f)
 	print('done')
 
-	# print('Requesting spot fleet...')
+	print('Interrogating bid advisor...', end='')
+	max_bid_advice, bid_advices = generate_spot_bid_per_vcpu(cx_fleet_weight, simplificed_price_list, cluster_region, bid_style=bid_style, cheap_factor=cheap_factor)
+	print('done')
+	print('\tMax spot price bid: ' + max_bid_advice)
+	for inst, spot in bid_advices.iteritems():
+		print('\t' + inst.rjust(18) + ': ' + spot)
 
 
-	print('Snooping at recent spot prices...')
+	### Requesting spot fleet
+	print('Placing spot fleet request...', end='')
+	dt_format = '%Y-%m-%dT%H:%M:%SZ'
 
-	print('-'*60)
+	with open('ipengine_config.sh', 'r') as f:
+		engine_startup_script = f.read()
+	engine_startup_script = engine_startup_script.format(ebsdata_mount_point=ebsdata_mount_point, 
+														 controller_ip=controller_private_ip)
+
+
+	with open(cluster_name + '_ClusterResources.json', 'w') as f:
+		json.dump(cluster, f, indent=1)
+
+	fleet_request = ec2.request_spot_fleet(SpotFleetRequestConfig={
+											   'IamFleetRole': 'arn:aws:iam::572771253416:role/aws-ec2-spot-fleet-role',
+											   'AllocationStrategy': 'lowestPrice', # 'lowestPrice' | 'diversified'
+											   'TargetCapacity': target_number_of_cores,
+											   'SpotPrice': max_bid_advice,
+											   'ValidFrom': datetime.utcnow().strftime(dt_format),
+											   'ValidUntil': (datetime.utcnow() + timedelta(days=365.25)).strftime(dt_format),
+											   'TerminateInstancesWithExpiration': True,
+											   'Type': 'maintain', # if maintain else 'request',
+											   'LaunchSpecifications': [instance_launch_specifications(image_id=ami_linux_id,
+																									   instance_type=instance_type,
+																									   subnet_ids=[v[0] for v in subnet_ids.values()],
+																									   security_group_ids=sgengine_id,
+																									   key_name=key_name,
+																									   weighted_capacity=cx_fleet_weight[instance_type],
+																									   spot_price=spotprice,
+																									   raw_startup_script=engine_startup_script) for instance_type, spotprice in bid_advices.items()]
+										   }
+										   )
+
+	spot_fleet_request_id = fleet_request['SpotFleetRequestId']
+	cluster['spot_fleet_request_id'] = spot_fleet_request_id
+
+	print('done')
+
+
+	with open(cluster_name + '_ClusterResources.json', 'w') as f:
+		json.dump(cluster, f, indent=1)
+
+	print('\n' + '-'*60 + '\n')
 	print('To access the ipyparallel cluster, first fetch the configuration file:')
 	print('\tscp -i ' + key_path + ' ec2-user@' + controller_public_ip + ':' + ebsdata_mount_point + '/profile_ec2/security/ipcontroller-client.json .')
 	print('and then from python:')
@@ -359,7 +404,7 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 	return cluster
 
 
-def dismantle_cluster(resources_file_or_dict, keep_EBSdata=True):
+def dismantle_cluster(resources_file_or_dict, keep_ebsdata_volume=True):
 	if type(resources_file_or_dict) == str:
 		with open(resources_file_or_dict, 'r') as f:
 			cluster = json.load(f)
@@ -371,6 +416,18 @@ def dismantle_cluster(resources_file_or_dict, keep_EBSdata=True):
 		raise Exception(resources_file_or_dict + ' doesn\'t look like anything to me.')
 
 	ec2 = boto3.client('ec2', region_name=cluster['region'])
+
+
+	print('Cancelling/terminating spot fleet request/instances...', end='')
+	try:
+		ec2.cancel_spot_fleet_requests(SpotFleetRequestIds=[cluster['spot_fleet_request_id']], TerminateInstances=True)
+	except Exception as e:
+		if 'NotFound' in str(e):
+			print('(NotFound)...', end='')
+		else:
+			print('\n' + str(e))
+	print('done')
+
 
 	print('Terminating controller instance...', end='')
 	ec2.terminate_instances(InstanceIds=[cluster['controller_instance_id']])
@@ -388,7 +445,7 @@ def dismantle_cluster(resources_file_or_dict, keep_EBSdata=True):
 		except:
 			break
 
-	if not keep_EBSdata:
+	if not keep_ebsdata_volume:
 		print('Deleting EBS data volume...', end='')
 		try:
 			ec2.delete_volume(VolumeId=cluster['ebsdata']['volume_id'])
@@ -562,7 +619,7 @@ def generate_simplified_price_list():
 
 	return simplified_price_dict
 
-def generate_spot_bid_per_vcpu(instance_types_weights, simplified_price_dict, region, bid_type='cheap', cheap_percentile=75):
+def generate_spot_bid_per_vcpu(instance_types_weights, simplified_price_dict, region, bid_style='cheap', cheap_factor=1.5, cheap_percentile=75):
 
 	client = boto3.client('ec2', region_name=region)
 
@@ -572,12 +629,15 @@ def generate_spot_bid_per_vcpu(instance_types_weights, simplified_price_dict, re
 									 }
 
 	max_auto = max(ondemand_shared_price_per_vcpu.values())
-	if bid_type == 'automatic':
-		return max_auto, ondemand_shared_price_per_vcpu
 
-	elif bid_type == 'cheap':
+	if bid_style == 'automatic':
+		for inst, v in ondemand_shared_price_per_vcpu.items():
+			ondemand_shared_price_per_vcpu[inst] = str(round(ondemand_shared_price_per_vcpu[inst], 6))
+		return str(round(max_auto, 6)), ondemand_shared_price_per_vcpu
+
+	elif bid_style == 'cheap':
 		history = client.describe_spot_price_history(StartTime=datetime.utcnow() - timedelta(days=2), 
-									   EndTime=datetime.utcnow(), 
+									   #EndTime=datetime.utcnow(), 
 									   InstanceTypes=instance_types_weights.keys(),
 									   # AvailabilityZone='ca-central-1b',
 									   Filters=[{'Name':'product-description', 'Values':['Linux/UNIX']}])
@@ -592,20 +652,54 @@ def generate_spot_bid_per_vcpu(instance_types_weights, simplified_price_dict, re
 		
 		# min_region_thirdQ_spot, max_region_thirdQ_spot = ('', '', finfo(float).max), ('', '', 0.0)
 		max_cheap_percentile = dict()
+		max_cheap_all = 0.0
 		for inst, regional_timeseries in spot_prices.items():
 			max_cheap_percentile[inst] = 0.0
 			for region, time_serie in regional_timeseries.items():
-				# median_spot = median(time_serie)
-				# third_quantile_spot = percentile(time_serie, 75)
-				# ninety_percentile_spot = percentile(time_serie, 90)
 				cheap_percentile_spot = percentile(time_serie, cheap_percentile)
-				max_cheap_percentile[inst] = min(ondemand_shared_price_per_vcpu[inst], max(cheap_percentile_spot, max_cheap_percentile[inst]))
-				# min_region_thirdQ_spot = min(min_region_thirdQ_spot, (inst, region, third_quantile_spot), key=lambda x: x[2])
-				# max_region_thirdQ_spot = max(max_region_thirdQ_spot, (inst, region, third_quantile_spot), key=lambda x: x[2])
-				# regional_timeseries[region] = (median_spot, third_quantile_spot, ninety_percentile_spot)
-		# return (min_region_thirdQ_spot, max_region_thirdQ_spot, spot_prices)
-		return min(max_auto, max(max_cheap_percentile.values())), max_cheap_percentile
+				max_cheap_percentile[inst] = max(cheap_percentile_spot, max_cheap_percentile[inst])
 
+			## Inflate by cheap_factor and cap by OnDemand price.
+			max_cheap_percentile[inst] = min(ondemand_shared_price_per_vcpu[inst], cheap_factor*max_cheap_percentile[inst])
+			max_cheap_all = max(max_cheap_all, max_cheap_percentile[inst])
+			max_cheap_percentile[inst] = str(round(max_cheap_percentile[inst], 6))
+
+		return str(round(max_cheap_all, 6)), max_cheap_percentile
+
+
+def instance_launch_specifications(image_id, instance_type, subnet_ids, security_group_ids, key_name, weighted_capacity, spot_price, raw_startup_script):
+	if type(subnet_ids) == str:
+		subnet_ids = [subnet_ids]
+	if type(spot_price) == float:
+		spot_price = str(spot_price)
+	if type(security_group_ids) == str:
+		security_group_ids = [security_group_ids]
+
+	base64_startup_script = base64.b64encode(raw_startup_script)
+	
+	specs = {
+	  'ImageId': image_id,
+	  'InstanceType': instance_type,
+	  'SubnetId': ', '.join(subnet_ids),
+	  'KeyName': key_name,
+	  'WeightedCapacity': weighted_capacity,
+	  'SpotPrice': spot_price,
+	  'BlockDeviceMappings': [
+		{
+		  'DeviceName': '/dev/xvda',
+		  'Ebs': {
+			'DeleteOnTermination': True,
+			'VolumeType': 'gp2',
+			'VolumeSize': 8#,
+#			 'SnapshotId': 'snap-083bdc51d0a3122fa'
+		  }
+		}
+	  ],
+	  'SecurityGroups': [{'GroupId': sgid} for sgid in security_group_ids],
+	  'UserData': base64_startup_script
+	}
+	
+	return specs
 
 def main():
 	pass
