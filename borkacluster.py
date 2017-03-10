@@ -5,13 +5,37 @@ from datetime import datetime, timedelta
 import ipaddress
 from itertools import count
 import json
-from numpy import ceil, log2, mean, median, std
+from numpy import ceil, finfo, log2, mean, median, percentile, std
 import os
 from random import choice
 import re
 import requests
+import subprocess
 import sys
 import time
+
+region_to_region = {'us-east-1':'US East (N. Virginia)', 
+					'us-east-2':'US East (Ohio)', 
+					'us-west-1':'US West (N. California)', 
+					'us-west-2':'US West (Oregon)', 
+					'ap-south-1':'Asia Pacific (Mumbai)', 
+					'ap-northeast-2':'Asia Pacific (Seoul)', 
+					'ap-southeast-1':'Asia Pacific (Singapore)', 
+					'ap-southeast-2':'Asia Pacific (Sydney)', 
+					'ap-northeast-1':'Asia Pacific (Tokyo)', 
+					'ca-central-1':'Canada (Central)', 
+					'cn-north-1':'China (Beijing)', 
+					'eu-central-1':'EU (Frankfurt)', 
+					'eu-west-1':'EU (Ireland)', 
+					'eu-west-2':'EU (London)', 
+					'sa-east-1':'South America (Sao Paulo)', 
+					'us-gov-west-1':'AWS GovCloud (US)' 
+					}				
+
+cx_fleet_weight = {'c3.large': 2.0, 'c3.xlarge': 4.0, 'c3.2xlarge': 8.0, 'c3.4xlarge': 16.0, 'c3.8xlarge': 32.0,
+                   'c4.large': 2.0, 'c4.xlarge': 4.0, 'c4.2xlarge': 8.0, 'c4.4xlarge': 16.0, 'c4.8xlarge': 36.0
+                   }
+
 
 def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='cheap', cheap_factor=1.5, cluster_region='ca-central-1', controller_availability_zone=None, data_volume_size=16):
 	""" Create a computing cluster out of an EC2 spot fleet of Linux instances.
@@ -114,6 +138,8 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 		print(subnet + '(' + zone + ')...', end='')
 		res = ec2.create_subnet(VpcId=vpc_id, CidrBlock=subnet, AvailabilityZone=zone)
 		ec2.modify_subnet_attribute(SubnetId=res['Subnet']['SubnetId'], MapPublicIpOnLaunch={'Value':True})
+
+		## Little but here, you should describe later and save because you modified an attribute which res doesn't contain.
 		subnets.append(res['Subnet'])
 
 	subnet_ids = {subnet['AvailabilityZone']:(subnet['SubnetId'], subnet['CidrBlock']) for subnet in subnets}
@@ -304,17 +330,21 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 	with open(cluster_name + '_ClusterResources.json', 'w') as f:
 		json.dump(cluster, f, indent=1)
 
-	print('Requesting spot fleet...')
-	hist = ec2.describe_spot_price_history(StartTime=datetime.utcnow() - timedelta(hours=6), 
-								EndTime=datetime.utcnow(), 
-								InstanceTypes=['c4.large'],
-								AvailabilityZone='ca-central-1b',
-								Filters=[{'Name':'product-description', 'Values':['Linux/UNIX']}])
-	spot_prices = [float(spot['SpotPrice']) for spot in hist['SpotPriceHistory']]
-	mean_spot, median_spot, std_spot = mean(spot_prices), median(spot_prices), std(spot_prices)
 
-	print('Spot price  $' + str(median_spot)*core_fleet_size + '/hour')
+	print('Load OnDemand price list...', end='')
+	if not os.path.isfile('simplified_price_list.json'):
+		print('not found, downloading...', end='')
+		simplified_price_list = generate_simplified_price_list()
+	else:
+		print('using simplified_price_list.json...',)
+		with open('simplified_price_list.json', 'r') as f:
+			simplificed_price_list = json.load(f)
+	print('done')
 
+	# print('Requesting spot fleet...')
+
+
+	print('Snooping at recent spot prices...')
 
 	print('-'*60)
 	print('To access the ipyparallel cluster, first fetch the configuration file:')
@@ -529,6 +559,52 @@ def generate_simplified_price_list():
 	with open('simplified_price_list.json', 'w') as f:
 		json.dump(simplified_price_dict, f, indent=1)
 	print('done')
+
+	return simplified_price_dict
+
+def generate_spot_bid_per_vcpu(instance_types_weights, simplified_price_dict, region, bid_type='cheap', cheap_percentile=75):
+
+	client = boto3.client('ec2', region_name=region)
+
+	ondemand_shared_price_per_vcpu = {it:float(simplified_price_dict[it]['Shared'][region_to_region[region]])/w 
+										for it, w in instance_types_weights.items() 
+											if simplified_price_dict[it]['Shared'].has_key(region_to_region[region])
+									 }
+
+	max_auto = max(ondemand_shared_price_per_vcpu.values())
+	if bid_type == 'automatic':
+		return max_auto, ondemand_shared_price_per_vcpu
+
+	elif bid_type == 'cheap':
+		history = client.describe_spot_price_history(StartTime=datetime.utcnow() - timedelta(days=2), 
+									   EndTime=datetime.utcnow(), 
+									   InstanceTypes=instance_types_weights.keys(),
+									   # AvailabilityZone='ca-central-1b',
+									   Filters=[{'Name':'product-description', 'Values':['Linux/UNIX']}])
+
+		spot_prices = dict()
+		for spot in history['SpotPriceHistory']:
+			if not spot_prices.has_key(spot['InstanceType']):
+				spot_prices[spot['InstanceType']] = dict()
+			if not spot_prices[spot['InstanceType']].has_key(spot['AvailabilityZone']):
+				spot_prices[spot['InstanceType']][spot['AvailabilityZone']] = []
+			spot_prices[spot['InstanceType']][spot['AvailabilityZone']].append(float(spot['SpotPrice'])/cx_fleet_weight[spot['InstanceType']])
+		
+		# min_region_thirdQ_spot, max_region_thirdQ_spot = ('', '', finfo(float).max), ('', '', 0.0)
+		max_cheap_percentile = dict()
+		for inst, regional_timeseries in spot_prices.items():
+			max_cheap_percentile[inst] = 0.0
+			for region, time_serie in regional_timeseries.items():
+				# median_spot = median(time_serie)
+				# third_quantile_spot = percentile(time_serie, 75)
+				# ninety_percentile_spot = percentile(time_serie, 90)
+				cheap_percentile_spot = percentile(time_serie, cheap_percentile)
+				max_cheap_percentile[inst] = min(ondemand_shared_price_per_vcpu[inst], max(cheap_percentile_spot, max_cheap_percentile[inst]))
+				# min_region_thirdQ_spot = min(min_region_thirdQ_spot, (inst, region, third_quantile_spot), key=lambda x: x[2])
+				# max_region_thirdQ_spot = max(max_region_thirdQ_spot, (inst, region, third_quantile_spot), key=lambda x: x[2])
+				# regional_timeseries[region] = (median_spot, third_quantile_spot, ninety_percentile_spot)
+		# return (min_region_thirdQ_spot, max_region_thirdQ_spot, spot_prices)
+		return min(max_auto, max(max_cheap_percentile.values())), max_cheap_percentile
 
 
 def main():
