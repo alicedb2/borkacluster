@@ -1,7 +1,7 @@
 #!/bin/bash
 
 yum update -y
-yum -y install git htop ntf4-acl-tools
+yum -y install git htop ntf4-acl-tools tmux
 
 ## Install python deps
 sudo -u ec2-user bash -c "wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O \$HOME/miniconda.sh"
@@ -11,10 +11,13 @@ sudo -i -u ec2-user conda install -y ipyparallel dill
 #sudo -i -u ec2-user conda install -y scipy h5py matplotlib sortedcontainers
 #sudo -i -u ec2-user conda install -y -c etetoolkit ete2
 
-## Format and mount EBS dataa volume
+## Format and mount EBS data volume
 if [ ! -d {ebsdata_mount_point} ]
 then
 	mkdir {ebsdata_mount_point}
+	# You should check if dumpe2fs returns
+	# dumpe2fs: Bad magic number in super-block while trying to open /dev/xvdd
+	# Couldn't find valid filesystem superblock.
 	mke2fs -t ext4 {ebsdata_device}
 fi
 echo {ebsdata_device} {ebsdata_mount_point} ext4 defaults,auto 0 0 >> /etc/fstab
