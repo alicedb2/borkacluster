@@ -38,7 +38,7 @@ Launching controller instance...0:pending...0:pending...0:pending...16:running!
 	 Controller public IP: 52.60.133.174
 Attaching EBS data volume to controller...done
 Hold on to your helmet, requesting spot fleet (8 vCPU)...
-Load OnDemand price list...using simplified_price_list.json...done
+Loading OnDemand price list...using simplified_price_list.json...done
 Interrogating bid advisor...done
 	Max spot price bid: 0.0141
 	          c4.large: 0.009975

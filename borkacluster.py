@@ -336,7 +336,7 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 
 	print('Hold on to your helmet, requesting spot fleet (' + str(target_number_of_cores) + ' vCPU)...')
 	### Seeking bid advice
-	print('Load OnDemand price list...', end='')
+	print('Loading OnDemand price list...', end='')
 	if not os.path.isfile('simplified_price_list.json'):
 		print('not found, downloading...', end='')
 		simplified_price_list = generate_simplified_price_list()
