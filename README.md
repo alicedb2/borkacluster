@@ -77,7 +77,7 @@ lbv.queue_status()
 
 You now have 8 engines with 1 core each at your disposal.
 
-Each engine by default mounts on /ebsdata the 16 GiB NFS volume shared by the controller instance. Unless explicitly specified this volume is not deleted during the dismantling of the cluster. 
+By default each engine mounts the 16 GiB NFS volume shared by the controller instance. Unless explicitly specified this volume is not deleted during the dismantling of the cluster. The default mount point on both engines and controller is /ebsdata
 
 ```python
 # When you're done with the cluster
