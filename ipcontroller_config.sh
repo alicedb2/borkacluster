@@ -7,7 +7,7 @@ yum -y install git htop ntf4-acl-tools tmux
 sudo -u ec2-user bash -c "wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O \$HOME/miniconda.sh"
 sudo -u ec2-user bash -c "bash \$HOME/miniconda.sh -b -p \$HOME/miniconda"
 sudo -i -u ec2-user bash -c "echo export PATH=\\\$HOME/miniconda/bin:\\\$PATH >> \$HOME/.bashrc"
-sudo -i -u ec2-user conda install -y ipyparallel dill
+sudo -i -u ec2-user conda install -y ipyparallel dill boto3
 #sudo -i -u ec2-user conda install -y scipy h5py matplotlib sortedcontainers
 #sudo -i -u ec2-user conda install -y -c etetoolkit ete2
 
