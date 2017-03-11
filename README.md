@@ -14,7 +14,8 @@ This is really just a monolithic 'one-size-fits-no-one' automation script that c
 
 ## Usage
 
-```import borkacluster
+```python
+import borkacluster
 from ipyparallel import Client
 
 cluster = borkacluster.create_cluster()  # By default creates a cluster named bork with a fleet of 8 vCPU
