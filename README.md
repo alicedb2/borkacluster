@@ -103,3 +103,5 @@ Cluster bork dismantled!
 TODO
 * Fetch ipcontroller-client.json from controller instance when ready, and setup local ipyparallel profile accordingly
 * Reorganize/eliminate redundancy in security group permissions
+* Add possibility to attach and share an already existing NFS volume
+* Add support for EFS and S3 data storage (will need creation of IAM role)
