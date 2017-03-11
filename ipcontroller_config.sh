@@ -32,5 +32,5 @@ service nfs start
 ## Start ipcluster controller
 #IP=$(ifconfig eth0 inet | grep inet | awk '{{print $2}}')
 IP=$(ifconfig eth0 | grep 'inet addr' | cut -d: -f2 | awk '{{print $1}}')
-sudo -i -u ec2-user ipython profile create --parallel --profile-dir={ebsdata_mount_point}/profile_ec2
-sudo -i -u ec2-user ipcluster start --profile-dir={ebsdata_mount_point}/profile_ec2 --ip=$IP --n=0 --daemonize=True
+sudo -i -u ec2-user ipython profile create --parallel --profile-dir={ebsdata_mount_point}/profile_{cluster_name}
+sudo -i -u ec2-user ipcluster start --profile-dir={ebsdata_mount_point}/profile_{cluster_name} --ip=$IP --n=0 --daemonize=True

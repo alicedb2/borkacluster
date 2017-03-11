@@ -20,4 +20,4 @@ echo {controller_ip}:/ {ebsdata_mount_point} nfs4 nfsvers=4.1,rsize=1048576,wsiz
 mount {ebsdata_mount_point}
 
 ## Start ipcluster controller
-sudo -i -u ec2-user ipcluster engines --profile-dir={ebsdata_mount_point}/profile_ec2 --daemonize=True
+sudo -i -u ec2-user ipcluster engines --profile-dir={ebsdata_mount_point}/profile_{cluster_name} --daemonize=True
