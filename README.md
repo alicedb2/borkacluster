@@ -15,16 +15,57 @@ This is really just a monolithic 'one-size-fits-no-one' automation script that c
 ## Usage
 
 ```python
-import borkacluster
+from borkacluster import create_cluster, dismantle_cluster
 from ipyparallel import Client
 
-cluster = borkacluster.create_cluster()  # By default creates a cluster named bork with a fleet of 8 vCPU
-							   			 # Cluster resources are returned and saved in bork_ClusterResources.json
+cluster = create_cluster()  # By default creates a cluster named bork with a fleet of 8 vCPU
+			   			   # Cluster resources are returned and saved in bork_ClusterResources.json
 
-# For now you'll have to fetch the ipcontroller-client.json file yourself
+```
 
-borkacluster.dismantle_cluster(cluster)
+```
+Borking cluster: bork
+------------------------------------------------------------
+Creating Virtual Private Cloud (VPC) with prefix 10.0.0.0/16...configuring...done
+Creating Internet Gateway (IGW)...attaching...done
+Fixing route table (RTB)...done
+Creating subnets...10.0.0.0/17(ca-central-1a)...10.0.128.0/17(ca-central-1b)...done
+Creating security groups...bork_controller...bork_engine...bork_data...done
+Configuring security groups...bork_controller...bork_engine...bork_data...done
+No controller+EBS Avail. Zone specified, so I chose ca-central-1a for you.
+Creating EBS data volume, (controller) /dev/xvdd --> (controller) /ebsdata (16 GiB, gp2)...done
+Creating key pair...bork_ca-central-1 already exists and will be used (hope you kept that PEM file somewhere!)...done
+Launching controller instance...0:pending...0:pending...0:pending...16:running!
+	Controller private IP: 10.0.124.230
+	 Controller public IP: 52.60.133.174
+Attaching EBS data volume to controller...done
+Hold on to your helmet, requesting spot fleet (8 vCPU)...
+Load OnDemand price list...using simplified_price_list.json...done
+Interrogating bid advisor...done
+	Max spot price bid: 0.0141
+	          c4.large: 0.009975
+	        c4.8xlarge: 0.011667
+	        c4.2xlarge: 0.012398
+	        c4.4xlarge: 0.013322
+	         c4.xlarge: 0.0141
+At worst this cluster will cost $0.1128/hour.
 
+Placing spot fleet request...done
+```
+
+Monitor your controller instance on the AWS EC2 console. A couple of minutes later, fetch the ipcontroller-client.json file. If you're in IPython you can do something like
+```python
+!scp -oStrictHostKeyChecking=no -i bork_ca-central-1.pem ec2-user@52.60.133.174:/ebsdata/profile_bork/security/ipcontroller-client.json .
+
+from ipyparallel import Client
+
+bork_client = Client('ipcontroller-client.json', sshserver='ec2-user@52.60.133.174', sshkey='bork_ca-central-1.pem')
+lbv = bork_client.load_balanced_view()
+lbv.queue_status()
+
+# When you're done
+
+dismantle_cluster(cluster)
 ```
 
 TODO: Fetch ipcontroller-client.json from controller instance when ready, and setup local ipyparallel profile accordingly
