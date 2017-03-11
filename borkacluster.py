@@ -15,26 +15,26 @@ import sys
 import time
 
 region_to_region = {'us-east-1':'US East (N. Virginia)', 
-					'us-east-2':'US East (Ohio)', 
-					'us-west-1':'US West (N. California)', 
-					'us-west-2':'US West (Oregon)', 
-					'ap-south-1':'Asia Pacific (Mumbai)', 
-					'ap-northeast-2':'Asia Pacific (Seoul)', 
-					'ap-southeast-1':'Asia Pacific (Singapore)', 
-					'ap-southeast-2':'Asia Pacific (Sydney)', 
-					'ap-northeast-1':'Asia Pacific (Tokyo)', 
-					'ca-central-1':'Canada (Central)', 
-					'cn-north-1':'China (Beijing)', 
-					'eu-central-1':'EU (Frankfurt)', 
-					'eu-west-1':'EU (Ireland)', 
-					'eu-west-2':'EU (London)', 
-					'sa-east-1':'South America (Sao Paulo)', 
-					'us-gov-west-1':'AWS GovCloud (US)' 
-					}				
+		'us-east-2':'US East (Ohio)', 
+		'us-west-1':'US West (N. California)', 
+		'us-west-2':'US West (Oregon)', 
+		'ap-south-1':'Asia Pacific (Mumbai)', 
+		'ap-northeast-2':'Asia Pacific (Seoul)', 
+		'ap-southeast-1':'Asia Pacific (Singapore)', 
+		'ap-southeast-2':'Asia Pacific (Sydney)', 
+		'ap-northeast-1':'Asia Pacific (Tokyo)', 
+		'ca-central-1':'Canada (Central)', 
+		'cn-north-1':'China (Beijing)', 
+		'eu-central-1':'EU (Frankfurt)', 
+		'eu-west-1':'EU (Ireland)', 
+		'eu-west-2':'EU (London)', 
+		'sa-east-1':'South America (Sao Paulo)', 
+		'us-gov-west-1':'AWS GovCloud (US)' 
+		}				
 
 cx_fleet_weight = {'c3.large': 2.0, 'c3.xlarge': 4.0, 'c3.2xlarge': 8.0, 'c3.4xlarge': 16.0, 'c3.8xlarge': 32.0,
-				   'c4.large': 2.0, 'c4.xlarge': 4.0, 'c4.2xlarge': 8.0, 'c4.4xlarge': 16.0, 'c4.8xlarge': 36.0
-				   }
+		   'c4.large': 2.0, 'c4.xlarge': 4.0, 'c4.2xlarge': 8.0, 'c4.4xlarge': 16.0, 'c4.8xlarge': 36.0
+		   }
 
 
 def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='cheap', cheap_factor=1.5, cluster_region='ca-central-1', controller_availability_zone=None, data_volume_size=16):
@@ -288,7 +288,8 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 		controller_startup_script = f.read()
 	controller_startup_script = controller_startup_script.format(ebsdata_device=ebsdata_device, 
 																 ebsdata_mount_point=ebsdata_mount_point, 
-																 network_prefix=network_prefix)
+																 network_prefix=network_prefix,
+																 cluster_name=cluster_name)
 
 	controller_instance = ec2.run_instances(ImageId=ami_linux_id, KeyName=key_name, 
 											MinCount=1, MaxCount=1,
@@ -308,8 +309,8 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 		description = ec2.describe_instances(InstanceIds=[controller_instance_id])['Reservations'][0]['Instances'][0]
 		state = description['State']
 		if state['Code'] == 16:
-			controller_private_ip = description['PrivateIpAddress']
-			controller_public_ip = description['PublicIpAddress']
+			cluster['controller_private_ip'] = controller_private_ip = description['PrivateIpAddress']
+			cluster['controller_public_ip'] = controller_public_ip = description['PublicIpAddress']
 			print(str(state['Code']) + ':' + state['Name'] + '!')
 			break
 		else:
@@ -319,6 +320,7 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 			print('someone\'s slow!...', end='')
 	print('Controller private IP: ' + controller_private_ip)
 	print('Controller public IP: ' + controller_public_ip)
+
 	key_path = os.getcwd() + '/' + key_name + '.pem'
 	print('try this in a minute:\n\tssh -i ' + key_path + ' ec2-user@' + controller_public_ip)
 	cluster['controller_private_ip'] = controller_private_ip
@@ -336,7 +338,7 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 		print('not found, downloading...', end='')
 		simplified_price_list = generate_simplified_price_list()
 	else:
-		print('using simplified_price_list.json...',)
+		print('using simplified_price_list.json...', end='')
 		with open('simplified_price_list.json', 'r') as f:
 			simplificed_price_list = json.load(f)
 	print('done')
@@ -345,7 +347,7 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 	max_bid_advice, bid_advices = generate_spot_bid_per_vcpu(cx_fleet_weight, simplificed_price_list, cluster_region, bid_style=bid_style, cheap_factor=cheap_factor)
 	print('done')
 	print('\tMax spot price bid: ' + max_bid_advice)
-	for inst, spot in bid_advices.iteritems():
+	for inst, spot in sorted(bid_advices.iteritems(), key=lambda x: x[1]):
 		print('\t' + inst.rjust(18) + ': ' + spot)
 
 
@@ -356,7 +358,8 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 	with open('ipengine_config.sh', 'r') as f:
 		engine_startup_script = f.read()
 	engine_startup_script = engine_startup_script.format(ebsdata_mount_point=ebsdata_mount_point, 
-														 controller_ip=controller_private_ip)
+														 controller_ip=controller_private_ip,
+														 cluster_name=cluster_name)
 
 
 	with open(cluster_name + '_ClusterResources.json', 'w') as f:
@@ -417,8 +420,18 @@ def dismantle_cluster(resources_file_or_dict, keep_ebsdata_volume=True):
 
 	ec2 = boto3.client('ec2', region_name=cluster['region'])
 
+	print('Requesting fleet instance ids...', end='')
+	try:
+		fleet_instances = ec2.describe_spot_fleet_instances(SpotFleetRequestId=cluster['spot_fleet_request_id'])
+		fleet_instance_ids = [actinst['InstanceId'] for actinst in fleet_instances['ActiveInstances']]
+	except Exception as e:
+		if 'NotFound' in str(e):
+			print('(NotFound)...', end='')
+		else:
+			print('\n' + str(e))
+	print('done')
 
-	print('Cancelling/terminating spot fleet request/instances...', end='')
+	print('Cancelling fleet request...', end='')
 	try:
 		ec2.cancel_spot_fleet_requests(SpotFleetRequestIds=[cluster['spot_fleet_request_id']], TerminateInstances=True)
 	except Exception as e:
@@ -428,21 +441,42 @@ def dismantle_cluster(resources_file_or_dict, keep_ebsdata_volume=True):
 			print('\n' + str(e))
 	print('done')
 
+	print('Waiting for fleet instances to terminate...', end='')
+	for t in count():
+		try:
+			if t == 10:
+					print('someone\'s slow...', end='')
+			descriptions = ec2.describe_instances(InstanceIds=fleet_instance_ids)['Reservations'][0]['Instances']
+			states = [inst['State'] for inst in descriptions]
+			#shutting_down = sum([s['Code'] == 32 for s in states])
+			terminated = [s['Code'] == 48 for s in states]
+			if all(terminated):
+				print('fleet terminated!')
+				break
+			else:
+				print('shutting-down ({nb_term}/{nb_tot} terminated)...'.format(nb_term=sum(terminated), nb_tot=len(terminated)), end='')
+			time.sleep(8)
+
+		except Exception as e:
+			print('\n' + str(e))
+			break
 
 	print('Terminating controller instance...', end='')
 	ec2.terminate_instances(InstanceIds=[cluster['controller_instance_id']])
 	for t in count():
 		try:
+			if t == 8:
+				print('someone\'s slow...', end='')
 			state = ec2.describe_instances(InstanceIds=[cluster['controller_instance_id']])['Reservations'][0]['Instances'][0]['State']
 			if state['Code'] == 48:
 				print(str(state['Code']) + ':' + state['Name'] + '!')
 				break
 			else:
 				print(str(state['Code']) + ':' + state['Name'] + '...', end='')
+
 			time.sleep(8)
-			if t == 8:
-				print('someone\'s slow!...', end='')
-		except:
+		except Exception as e:
+			print('\n' + str(e))
 			break
 
 	if not keep_ebsdata_volume:
