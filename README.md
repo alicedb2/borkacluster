@@ -18,9 +18,7 @@ This is really just a monolithic 'one-size-fits-no-one' automation script that c
 from borkacluster import create_cluster, dismantle_cluster
 from ipyparallel import Client
 
-cluster = create_cluster()  # By default creates a cluster named bork with a fleet of 8 vCPU
-			   				# Cluster resources are returned and saved in bork_ClusterResources.json
-
+cluster = create_cluster(target_number_of_cores=8)
 ```
 
 ```
@@ -77,7 +75,9 @@ lbv.queue_status()
  u'unassigned': 0}
 ```
 
-You now have 8 engines with 1 core each at your disposal. Each engine by default mounts a 16 GiB NFS volume on /ebsdata which is shared by the controller instance. Unless explicitly specified this volume is not deleted during dismantling of the cluster. 
+You now have 8 engines with 1 core each at your disposal.
+
+Each engine by default mounts on /ebsdata the 16 GiB NFS volume shared by the controller instance. Unless explicitly specified this volume is not deleted during the dismantling of the cluster. 
 
 ```python
 # When you're done with the cluster
