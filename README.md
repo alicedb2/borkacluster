@@ -19,7 +19,7 @@ from borkacluster import create_cluster, dismantle_cluster
 from ipyparallel import Client
 
 cluster = create_cluster()  # By default creates a cluster named bork with a fleet of 8 vCPU
-			   			   # Cluster resources are returned and saved in bork_ClusterResources.json
+			   				# Cluster resources are returned and saved in bork_ClusterResources.json
 
 ```
 
@@ -62,10 +62,40 @@ from ipyparallel import Client
 bork_client = Client('ipcontroller-client.json', sshserver='ec2-user@52.60.133.174', sshkey='bork_ca-central-1.pem')
 lbv = bork_client.load_balanced_view()
 lbv.queue_status()
+```
 
-# When you're done
+```
+{0: {u'completed': 0, u'queue': 0, u'tasks': 0},
+ 1: {u'completed': 0, u'queue': 0, u'tasks': 0},
+ 2: {u'completed': 0, u'queue': 0, u'tasks': 0},
+ 3: {u'completed': 0, u'queue': 0, u'tasks': 0},
+ 4: {u'completed': 0, u'queue': 0, u'tasks': 0},
+ 5: {u'completed': 0, u'queue': 0, u'tasks': 0},
+ 6: {u'completed': 0, u'queue': 0, u'tasks': 0},
+ 7: {u'completed': 0, u'queue': 0, u'tasks': 0},
+ u'unassigned': 0}
+```
+
+```python
+# When you're done with the cluster
 
 dismantle_cluster(cluster)
+```
+
+```
+Finding fleet instance ids...done
+Cancelling fleet request...done
+Waiting for fleet instances to terminate...shutting-down (0/4 terminated)...shutting-down (0/4 terminated)...shutting-down (0/4 terminated)...shutting-down (0/4 terminated)...(4/4 terminated)...fleet terminated!
+Terminating controller instance...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...someone's slow...48:terminated!
+Deleting EBS data volume...done
+Wiping security group permissions...bork_data...bork_engine...bork_controller...done
+Deleting security groups...bork_data...bork_engine...bork_controller...done
+Deleting subnets...10.0.0.0/17(ca-central-1a)...10.0.128.0/17(ca-central-1b)...done
+Deleting internet route...done
+Detaching internet gateway...done
+Deleting internet gateway...done
+Deleting Virtual Private Cloud...done
+Cluster bork dismantled!
 ```
 
 TODO: Fetch ipcontroller-client.json from controller instance when ready, and setup local ipyparallel profile accordingly
