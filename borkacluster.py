@@ -3,6 +3,7 @@ import base64
 import boto3
 from datetime import datetime, timedelta
 import ipaddress
+import IPython
 from itertools import count
 import json
 from numpy import ceil, finfo, log2, mean, median, percentile, std
@@ -72,7 +73,7 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 	else:
 		raise Exception('Bid style must be either \'cheap\' or \'automatic\'.')
 
-	print('Borking cluster: ' + cluster_name)
+	print('Borking cluster: ' + cluster_name + ' (' + target_number_of_cores + ' vCPU)')
 	print('-'*60)
 
 	cluster = dict()
@@ -318,12 +319,14 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 		time.sleep(8)
 		if t == 8:
 			print('someone\'s slow!...', end='')
-	print('Controller private IP: ' + controller_private_ip)
-	print('Controller public IP: ' + controller_public_ip)
+	print('\tController private IP: ' + controller_private_ip)
+	print('\t Controller public IP: ' + controller_public_ip)
 
 	key_path = os.getcwd() + '/' + key_name + '.pem'
-	print('try this in a minute:\n\tssh -i ' + key_path + ' ec2-user@' + controller_public_ip)
-	cluster['controller_private_ip'] = controller_private_ip
+	cluster['ipcontroller-client.json'] = ebsdata_mount_point + '/profile_' + cluster_name + '/security/ipcontroller-client.json'
+	cluster['local_keypair_file'] = key_path
+	# print('try this in a minute:\n\tssh -i ' + key_path + ' ec2-user@' + controller_public_ip)
+	# cluster['controller_private_ip'] = controller_private_ip
 	### Attaching EBS data volume once the controller is in the running state
 	print('Attaching EBS data volume to controller...', end='')
 	ec2.attach_volume(VolumeId=ebsdata_id, InstanceId=controller_instance_id, Device=ebsdata_device)
@@ -349,8 +352,7 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 	print('\tMax spot price bid: ' + max_bid_advice)
 	for inst, spot in sorted(bid_advices.iteritems(), key=lambda x: x[1]):
 		print('\t' + inst.rjust(18) + ': ' + spot)
-
-
+	print('\tAt worst this cluster will cost $' + str(round(float(max_bid_advice)*target_number_of_cores, 6)) + '/hour.')
 	### Requesting spot fleet
 	print('Placing spot fleet request...', end='')
 	dt_format = '%Y-%m-%dT%H:%M:%SZ'
@@ -374,37 +376,71 @@ def create_cluster(cluster_name='bork', target_number_of_cores=8, bid_style='che
 											   'ValidUntil': (datetime.utcnow() + timedelta(days=365.25)).strftime(dt_format),
 											   'TerminateInstancesWithExpiration': True,
 											   'Type': 'maintain', # if maintain else 'request',
-											   'LaunchSpecifications': [instance_launch_specifications(image_id=ami_linux_id,
-																									   instance_type=instance_type,
-																									   subnet_ids=[v[0] for v in subnet_ids.values()],
-																									   security_group_ids=sgengine_id,
-																									   key_name=key_name,
-																									   weighted_capacity=cx_fleet_weight[instance_type],
-																									   spot_price=spotprice,
-																									   raw_startup_script=engine_startup_script) for instance_type, spotprice in bid_advices.items()]
+											   'LaunchSpecifications': [instance_launch_specifications(
+											   	image_id=ami_linux_id,
+											   	instance_type=instance_type,
+												subnet_ids=[v[0] for v in subnet_ids.values()],
+												security_group_ids=sgengine_id,
+												key_name=key_name,
+												weighted_capacity=cx_fleet_weight[instance_type],
+												spot_price=spotprice,
+												raw_startup_script=engine_startup_script) for instance_type, spotprice in bid_advices.items()]
 										   }
-										   )
+										)
 
 	spot_fleet_request_id = fleet_request['SpotFleetRequestId']
 	cluster['spot_fleet_request_id'] = spot_fleet_request_id
-
 	print('done')
+	print('Cluster ' + cluster_name + ' should be up and running in a couple minutes.')
 
 
 	with open(cluster_name + '_ClusterResources.json', 'w') as f:
 		json.dump(cluster, f, indent=1)
 
-	print('\n' + '-'*60 + '\n')
-	print('To access the ipyparallel cluster, first fetch the configuration file:')
-	print('\tscp -i ' + key_path + ' ec2-user@' + controller_public_ip + ':' + ebsdata_mount_point + '/profile_ec2/security/ipcontroller-client.json .')
-	print('and then from python:')
-	print('\tfrom ipyparallel import Client')
-	print('\tc = Client(\'ipcontroller-client.json\', sshserver=\'ec2-user@' + controller_public_ip + '\', sshkey=\'' + key_path + '\')')
-	print('\tlbv = c.load_balanced_view()')
-	print('\tlbv.queue_status()')
+
+
+	# print('Waiting for controller to finish initializing...', end='')
+
+	# print('done')
+
+	# print('Setting-up local ipyparallel profile configuration...', end='')
+	# setup_local_ipcluster_profile(cluster)
+	# print('done')
+
+	# print('\n' + '-'*33 + '\n')
+	# # print('To access the ipyparallel cluster, first fetch the configuration file:')
+	# print('\tscp -i ' + key_path + ' ec2-user@' + controller_public_ip + ':' + ebsdata_mount_point + '/profile_ec2/security/ipcontroller-client.json .')
+	# print('and then from python:')
+	# print('\tfrom ipyparallel import Client')
+	# print('\tc = Client(\'ipcontroller-client.json\', sshserver=\'ec2-user@' + controller_public_ip + '\', sshkey=\'' + key_path + '\')')
+	# print('\tlbv = c.load_balanced_view()')
+	# print('\tlbv.queue_status()')
 
 
 	return cluster
+
+def setup_local_ipcluster_profile(resources_file_or_dict):
+	if type(resources_file_or_dict) == str:
+		with open(resources_file_or_dict, 'r') as f:
+			cluster = json.load(f)
+	elif (type(resources_file_or_dict) == dict):
+		if not 'name' in resources_file_or_dict:
+			raise Exception('Passed dictionary doesn\'t look like anything to me.')
+		cluster = resources_file_or_dict
+	else:
+		raise Exception(resources_file_or_dict + ' doesn\'t look like anything to me.')
+
+	if not cluster.has_key('local_keypair_file'):
+		local_keypair_file = os.getcwd() + '/' + cluster['keypair_name'] + '.pem'
+	else:
+		local_keypair_file = cluster['local_keypair_file']
+
+	local_security_path = '{ipython_path}/profile_{cluster_name}/security/'.format(ipython_path=IPython.paths.get_ipython_dir(), cluster_name=cluster['name'])
+	remote_security_file = '{ebsdata_mount_point}/profile_{cluster_name}/security/ipcontroller-client.json'.format(ebsdata_mount_point=cluster['ebsdata']['mount_point'], cluster_name=cluster['name'])
+	
+	os.makedirs(local_security_path)
+	
+	subprocess.call('scp -oStrictHostKeyChecking=no -i {local_keypair_file} ec2-user@{controller_public_ip}:{remote_security_file} {local_security_path}'.format(local_keypair_file=local_keypair_file, controller_public_ip=cluster['controller_public_ip'], remote_security_file=remote_security_file, local_security_path=local_security_path), shell=True)
 
 
 def dismantle_cluster(resources_file_or_dict, keep_ebsdata_volume=True):
@@ -420,7 +456,7 @@ def dismantle_cluster(resources_file_or_dict, keep_ebsdata_volume=True):
 
 	ec2 = boto3.client('ec2', region_name=cluster['region'])
 
-	print('Requesting fleet instance ids...', end='')
+	print('Finding fleet instance ids...', end='')
 	try:
 		fleet_instances = ec2.describe_spot_fleet_instances(SpotFleetRequestId=cluster['spot_fleet_request_id'])
 		fleet_instance_ids = [actinst['InstanceId'] for actinst in fleet_instances['ActiveInstances']]
@@ -451,7 +487,7 @@ def dismantle_cluster(resources_file_or_dict, keep_ebsdata_volume=True):
 			#shutting_down = sum([s['Code'] == 32 for s in states])
 			terminated = [s['Code'] == 48 for s in states]
 			if all(terminated):
-				print('fleet terminated!')
+				print('({nb_term}/{nb_tot} terminated)...fleet terminated!'.format(nb_term=sum(terminated), nb_tot=len(terminated)))
 				break
 			else:
 				print('shutting-down ({nb_term}/{nb_tot} terminated)...'.format(nb_term=sum(terminated), nb_tot=len(terminated)), end='')
@@ -653,13 +689,22 @@ def generate_simplified_price_list():
 
 	return simplified_price_dict
 
-def generate_spot_bid_per_vcpu(instance_types_weights, simplified_price_dict, region, bid_style='cheap', cheap_factor=1.5, cheap_percentile=75):
+def generate_spot_bid_per_vcpu(instance_types_weights, simplified_price_file_or_dict=None, region='us-east-1', bid_style='cheap', cheap_factor=1.5, cheap_percentile=75):
+
+	if type(simplified_price_file_or_dict) == str:
+		with open(simplified_price_file_or_dict, 'r') as f:
+			simplified_price_file_or_dict = json.load(f)
+	elif type(simplified_price_file_or_dict) == dict:
+		pass
+	elif simplified_price_file_or_dict is None:
+		with open('simplified_price_list.json', 'r') as f:
+			simplified_price_file_or_dict = json.load(f)
 
 	client = boto3.client('ec2', region_name=region)
 
-	ondemand_shared_price_per_vcpu = {it:float(simplified_price_dict[it]['Shared'][region_to_region[region]])/w 
+	ondemand_shared_price_per_vcpu = {it:float(simplified_price_file_or_dict[it]['Shared'][region_to_region[region]])/w 
 										for it, w in instance_types_weights.items() 
-											if simplified_price_dict[it]['Shared'].has_key(region_to_region[region])
+											if simplified_price_file_or_dict[it]['Shared'].has_key(region_to_region[region])
 									 }
 
 	max_auto = max(ondemand_shared_price_per_vcpu.values())
