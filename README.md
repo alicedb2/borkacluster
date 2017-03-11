@@ -24,7 +24,7 @@ cluster = create_cluster()  # By default creates a cluster named bork with a fle
 ```
 
 ```
-Borking cluster: bork
+Borking cluster: bork (8 vCPU)
 ------------------------------------------------------------
 Creating Virtual Private Cloud (VPC) with prefix 10.0.0.0/16...configuring...done
 Creating Internet Gateway (IGW)...attaching...done
@@ -48,9 +48,10 @@ Interrogating bid advisor...done
 	        c4.2xlarge: 0.012398
 	        c4.4xlarge: 0.013322
 	         c4.xlarge: 0.0141
-At worst this cluster will cost $0.1128/hour.
-
+	At worst this cluster will cost $0.1128/hour.
 Placing spot fleet request...done
+------------------------------------------------------------
+Cluster bork should be up and running in a couple minutes.
 ```
 
 Monitor your controller instance on the AWS EC2 console. A couple of minutes later, fetch the ipcontroller-client.json file. If you're in IPython you can do something like
@@ -105,3 +106,4 @@ TODO
 * Reorganize/eliminate redundancy in security group permissions
 * Add possibility to attach and share an already existing NFS volume
 * Add support for EFS and S3 data storage (will need creation of IAM role)
+* Check-point cluster resources more often to make cleaning-up easier in case something goes wrong
