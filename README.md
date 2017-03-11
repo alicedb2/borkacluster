@@ -90,7 +90,6 @@ Finding fleet instance ids...done
 Cancelling fleet request...done
 Waiting for fleet instances to terminate...shutting-down (0/4 terminated)...shutting-down (0/4 terminated)...shutting-down (0/4 terminated)...shutting-down (0/4 terminated)...(4/4 terminated)...fleet terminated!
 Terminating controller instance...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...32:shutting-down...someone's slow...48:terminated!
-Deleting EBS data volume...done
 Wiping security group permissions...bork_data...bork_engine...bork_controller...done
 Deleting security groups...bork_data...bork_engine...bork_controller...done
 Deleting subnets...10.0.0.0/17(ca-central-1a)...10.0.128.0/17(ca-central-1b)...done
