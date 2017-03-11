@@ -76,6 +76,8 @@ lbv.queue_status()
  u'unassigned': 0}
 ```
 
+You now have 8 engines with 1 core each at your disposal. Each engine by default mounts a 16 GiB NFS volume on /ebsdata which is shared by the controller instance. Unless explicitly specified this volume is not deleted during dismantling of the cluster. 
+
 ```python
 # When you're done with the cluster
 
@@ -98,4 +100,6 @@ Deleting Virtual Private Cloud...done
 Cluster bork dismantled!
 ```
 
-TODO: Fetch ipcontroller-client.json from controller instance when ready, and setup local ipyparallel profile accordingly
+TODO
+* Fetch ipcontroller-client.json from controller instance when ready, and setup local ipyparallel profile accordingly
+* Reorganize/eliminate redundancy in security group permissions
